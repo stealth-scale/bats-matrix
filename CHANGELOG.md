@@ -6,6 +6,10 @@ Every change a user would notice is recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-19
+
+First tagged release.
+
 ### Added
 
 - `run_matrix COMMAND [DELIMITER]`: runs a command against a table of rows read from stdin,
@@ -16,7 +20,8 @@ Every change a user would notice is recorded here. The format follows
 - A failure report with the row, the command, the expectation and the actual value.
 - `load.bash` as the entry point for `load` and `bats_load_library`.
 - A test suite of 155 cases, including strict-mode, input validation and EOF regressions.
-- Container tests with Podman and Docker, plus host tests on Ubuntu and macOS.
+- Container tests with Podman and Docker on Bash 4.4, 5.1, 5.2 and 5.3 with bats-core
+  1.7.0 and 1.14.0, plus host tests on Ubuntu and macOS.
 
 ### Fixed
 
@@ -27,5 +32,13 @@ Every change a user would notice is recorded here. The format follows
 - A row that expects exit status 127 runs through `run -127`, so bats does not raise
   warning BW01 for it.
 - The delimiter is quoted when the row is rebuilt for the failure report.
+- Exit statuses are validated as decimal values from 0 to 255, with leading zeroes
+  normalized without octal interpretation or arithmetic evaluation.
+- Ambiguous delimiters and malformed regexes are rejected; an invalid regex does not
+  execute the affected row's command.
+- An unterminated final row is processed, and commands cannot consume subsequent rows
+  from the table's stdin.
+- Failure reports include the source row number and quote arguments unambiguously.
 
-[Unreleased]: https://github.com/stealth-scale/bats-matrix/commits/main
+[Unreleased]: https://github.com/stealth-scale/bats-matrix/compare/v1.0.0...main
+[1.0.0]: https://github.com/stealth-scale/bats-matrix/releases/tag/v1.0.0

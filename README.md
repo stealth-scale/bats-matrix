@@ -36,7 +36,8 @@ repository is on `BATS_LIB_PATH`. `make install` copies the library to
 `/usr/local/lib/bats-matrix` for a system-wide `load`.
 
 Requirements: Bash 4 or later and bats-core 1.5.0 or later. The runner refuses to load on
-Bash 3. The test suite runs on Bash 5 with bats-core 1.7.0 and 1.14.0.
+Bash 3. CI tests Bash 4.4, 5.1, 5.2 and 5.3 with bats-core 1.7.0 and 1.14.0, plus host
+runs on Ubuntu and macOS.
 
 ## Writing a table
 
@@ -54,8 +55,8 @@ arg1 | arg2 | ... | status | output
   to the command as literal text.
 - The command runs with its standard input on `/dev/null`, so a command that reads stdin does
   not consume the rows after it.
-- `status` must be a non-negative integer. Any other value stops the run before any row
-  executes.
+- `status` must be a decimal integer from 0 to 255; leading zeroes are accepted. An invalid
+  status stops the run before that row executes. Earlier rows may already have run.
 
 ## Expecting output
 
@@ -73,8 +74,8 @@ patterns. Matching is case sensitive.
 
 ## Delimiters
 
-The default delimiter is `|`. Pass another one as the second argument when a value or a regex
-needs the pipe:
+The default delimiter is `|`. A delimiter must be one non-whitespace character. Pass another
+one as the second argument when a value or a regex needs the pipe:
 
 ```bash
 run_matrix printf ';' <<'EOM'
