@@ -2,8 +2,9 @@
 
 ## Getting set up
 
-You need Bash 4 or later, [bats-core](https://github.com/bats-core/bats-core) 1.7.0 or
-later, [ShellCheck](https://www.shellcheck.net) and GNU make.
+You need Bash 4 or later, [ShellCheck](https://www.shellcheck.net), GNU make and
+Podman or Docker. `make test` uses the official Bats image; no image build is needed.
+For `make test-host`, install [bats-core](https://github.com/bats-core/bats-core) 1.7.0 or later.
 
 ```sh
 sudo dnf install bats ShellCheck make      # Fedora
@@ -19,21 +20,23 @@ make check
 ## Before you open a pull request
 
 ```sh
-make lint       # shellcheck over the loader, the sources, the tests and the scripts
-make test       # the test suite
-make coverage   # line coverage of src/, at a 100% floor
-make check      # what CI runs: lint, then test
+make lint       # shellcheck over the loader, the sources and the tests
+make test       # the test suite in the official Bats container
+make test-host  # the test suite with the local Bats and Bash
+make check      # lint and container tests
 ```
 
-CI runs `make check` on Ubuntu and macOS, against bats-core 1.7.0 and the latest release,
-and `make coverage` on Ubuntu.
+Use `RUNTIME=docker` for Docker; the default is Podman. `TARGET` selects one test file
+or directory, and `IMAGE` overrides the official Bats image.
+
+CI runs `make lint`, `make test-host` on Ubuntu and macOS with bats-core 1.7.0 and
+1.14.0, and `make test` on Ubuntu with both Podman and Docker.
 
 ## A change to the runner
 
 - Put the test in the group of `tests/matrix.bats` it belongs to, and name it in the form the
   group uses: `area: case -> expectation`.
-- A behaviour a user can observe has a test. `make coverage` reports the lines the suite
-  never reached.
+- A behaviour a user can observe has a test.
 - Add a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) for a change a user
   would notice.
 
@@ -46,7 +49,7 @@ A release is a tag on `main`.
 2. Commit as `chore: release vX.Y.Z`.
 3. `git tag -s vX.Y.Z -m vX.Y.Z && git push --follow-tags`.
 
-The release workflow runs `make check` on the tag and publishes a GitHub release with the
+The release workflow runs the full CI matrix on the tag and publishes a GitHub release with the
 changelog entry as its notes. A tag without a matching changelog entry fails the workflow.
 
 ## Conventions

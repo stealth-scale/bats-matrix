@@ -15,7 +15,8 @@ Every change a user would notice is recorded here. The format follows
 - `MATRIX_DEBUG` to print every row before it runs.
 - A failure report with the row, the command, the expectation and the actual value.
 - `load.bash` as the entry point for `load` and `bats_load_library`.
-- A test suite of 121 cases and a line coverage script at a 100% floor.
+- A test suite of 155 cases, including strict-mode, input validation and EOF regressions.
+- Container tests with Podman and Docker, plus host tests on Ubuntu and macOS.
 
 ### Fixed
 

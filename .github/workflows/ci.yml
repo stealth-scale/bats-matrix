@@ -13,6 +13,10 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   SHELLCHECK_VERSION: v0.11.0
 
@@ -21,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install ShellCheck ${{ env.SHELLCHECK_VERSION }}
         run: |
           mkdir -p "$HOME/.local/bin"
@@ -31,37 +35,57 @@ jobs:
           "$HOME/.local/bin/shellcheck" --version
       - run: make lint
 
-  test:
+  test-host:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        bats: ["1.7.0", "1.14.0"]
+        bats:
+          - version: "1.7.0"
+            sha256: ac70c2a153f108b1ac549c2eaa4154dea4a7c1cc421e3352f0ce6ea49435454e
+          - version: "1.14.0"
+            sha256: bb537b70b15b732f6d8827dd6578e3d8ce166636ce1f18ea9a074184fcce9177
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Bash 5 on macOS
         if: runner.os == 'macOS'
         run: |
           brew install bash
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
-      - name: Install bats-core ${{ matrix.bats }}
+      - name: Install bats-core ${{ matrix.bats.version }}
+        env:
+          BATS_VERSION: ${{ matrix.bats.version }}
+          BATS_SHA256: ${{ matrix.bats.sha256 }}
         run: |
-          git clone --quiet --depth 1 --branch "v${{ matrix.bats }}" https://github.com/bats-core/bats-core.git /tmp/bats-core
-          /tmp/bats-core/install.sh "$HOME/.local"
+          bats_dir="$(mktemp -d)"
+          curl -fsSL "https://github.com/bats-core/bats-core/archive/refs/tags/v${BATS_VERSION}.tar.gz" -o "$bats_dir/bats.tar.gz"
+          printf '%s  %s\n' "$BATS_SHA256" "$bats_dir/bats.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$bats_dir/bats.tar.gz" --strip-components=1 -C "$bats_dir"
+          "$bats_dir/install.sh" "$HOME/.local"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: bash --version | head -1 && bats --version
-      - run: make test
+      - run: bash --version && bats --version
+      - run: make test-host
 
-  coverage:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  container:
+    name: container (${{ matrix.runtime }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [podman, docker]
     steps:
-      - uses: actions/checkout@v7
-      - name: Install bats-core
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Podman
+        if: matrix.runtime == 'podman'
         run: |
-          git clone --quiet --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
-          /tmp/bats-core/install.sh "$HOME/.local"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: make coverage
+          sudo apt-get update
+          sudo apt-get install -y podman
+      - name: Run container tests
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+        run: |
+          "$RUNTIME" --version
+          make test

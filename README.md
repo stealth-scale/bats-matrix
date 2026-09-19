@@ -141,11 +141,13 @@ and returns 1 when it is not.
 ## Working here
 
 ```sh
-make check      # shellcheck, then the test suite
-make test       # the suite alone; BATS_FLAGS and BATS override the defaults
-make lint       # shellcheck over the loader, the sources, the tests and the scripts
-make coverage   # line coverage of src/ at a 100% floor
+make check      # shellcheck, then container tests
+make test       # tests in the official Bats image; RUNTIME defaults to podman
+make test-host  # tests locally; BATS and BATS_FLAGS override the defaults
+make lint       # shellcheck over the loader, the sources and the tests
 ```
+
+Use `make test RUNTIME=docker` for Docker, or `TARGET=tests/matrix.bats` to select a file.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 

@@ -24,9 +24,9 @@
 : "${BATS_MATRIX_DELIMITER:=|}"
 
 # Polyfill the fail function
-if ! declare -F fail; then
+if ! declare -F fail >/dev/null; then
     fail() {
-        echo "$@" >&2
+        printf '%s\n' "$*" >&2
         return 1
     }
 fi
@@ -55,6 +55,21 @@ matrix::internal::require_bash4 || return 1
 # ------------------------------------------------------------------------------
 # Private Helpers
 # ------------------------------------------------------------------------------
+
+# Validate decimal exit statuses without evaluating user input as arithmetic.
+# Leading zeroes are accepted; the runner normalizes them before comparison.
+matrix::internal::valid_status() {
+    [[ "${1:-}" =~ ^0*([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$ ]]
+}
+
+# A regex compilation error (2) is distinct from an ordinary non-match (1).
+matrix::internal::valid_regex() {
+    local regex="${1:-}"
+    local result=0
+    # shellcheck disable=SC2319  # deliberately capture [[ =~ ]]'s regex error status (2)
+    [[ '' =~ $regex ]] || result=$?
+    [[ "$result" -ne 2 ]]
+}
 
 #######################################
 # Formats and prints a failure message using BATS 'fail'.
@@ -153,7 +168,17 @@ matrix::assert::status() {
     local raw_line="${5:-}"
     local output_log="${6:-}"
 
-    if [[ "${actual}" -ne "${expected}" ]]; then
+    # Both values must be valid before comparison; missing run results must fail.
+    if ! matrix::internal::valid_status "$expected" || ! matrix::internal::valid_status "$actual"; then
+        matrix::internal::fail "Invalid Status" "$func_name" "$args_str" "$raw_line" \
+            "Decimal exit codes from 0 to 255" "Expected '${expected}', actual '${actual}'"
+        return 1
+    fi
+    expected="${expected#"${expected%%[!0]*}"}"
+    actual="${actual#"${actual%%[!0]*}"}"
+    expected="${expected:-0}"
+    actual="${actual:-0}"
+    if [[ "${actual}" != "${expected}" ]]; then
         matrix::internal::fail "Status Mismatch" "${func_name}" "${args_str}" "${raw_line}" \
             "Exit Code '${expected}'" \
             "Exit Code '${actual}'" \
@@ -187,10 +212,10 @@ matrix::assert::multiline() {
     local args_str="${4:-}"
     local raw_line="${5:-}"
 
-    # 1. Expansion: Convert literal '\n' characters into real newlines.
-    # We use 'printf %b' which reliably expands backslash escapes.
-    local expected_expanded
-    printf -v expected_expanded "%b" "${expected}"
+    # Decode only the documented text escapes. printf %b also interprets \c and
+    # NUL escapes, which can silently truncate the expectation to an empty string.
+    local expected_expanded="${expected//\\n/$'\n'}"
+    expected_expanded="${expected_expanded//\\t/$'\t'}"
 
     # 2. Strict Substring Check (No normalization of 'actual')
     # We check if the raw actual output contains the expanded block.
@@ -249,6 +274,12 @@ matrix::assert::output() {
 
         # Trim potential leading space after the tilde
         regex="${regex#"${regex%%[![:space:]]*}"}"
+
+        if ! matrix::internal::valid_regex "$regex"; then
+            matrix::internal::fail "Invalid Regex" "$func_name" "$args_str" "$raw_line" \
+                "A valid extended regular expression" "$regex"
+            return 1
+        fi
 
         # Trim trailing whitespace from actual to ensure '$' anchors work as expected on line output
         local trimmed_actual="${actual}"
@@ -314,10 +345,23 @@ matrix::runner::execute() {
     local delimiter="${2:-${BATS_MATRIX_DELIMITER:-|}}"
     local line
     local has_input=0
+    local row_number=0
 
     # Strict mode: Validate required argument
     if [[ -z "${func_name}" ]]; then
         fail "Error: run_matrix requires a function name as the first argument."
+        return 1
+    fi
+
+    if (( $# > 2 )); then
+        fail "Error: usage: run_matrix COMMAND [DELIMITER]"
+        return 1
+    fi
+
+    # IFS treats a string as a set of separators, and collapses whitespace ones.
+    # Refuse ambiguous formats instead of silently changing argument boundaries.
+    if [[ "${#delimiter}" -ne 1 || "$delimiter" == [[:space:]] ]]; then
+        fail "Error: Matrix delimiter must be one non-whitespace character."
         return 1
     fi
 
@@ -327,8 +371,9 @@ matrix::runner::execute() {
         return 1
     fi
 
-    # Loop consumes stdin. 'read' will return false at EOF, handling set -e safely.
-    while read -r line; do
+    # Process data returned with EOF as well as newline-terminated records.
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        row_number=$((row_number + 1))
         # Skip empty lines and comments
         [[ "${line}" =~ ^[[:space:]]*$ || "${line}" =~ ^[[:space:]]*# ]] && continue
         has_input=1
@@ -346,7 +391,7 @@ matrix::runner::execute() {
         # Minimum required: Sentinel + Arg1 + Status + Output + Sentinel = 5 fields
         # (Allows 0 args: Sentinel + Status + Output + Sentinel = 4 fields)
         if (( total_fields < 4 )); then
-             fail "Error: Malformed matrix row. Expected at least 'Status | Output'. Row: ${line}"
+             fail "Error: Malformed matrix row ${row_number}. Expected at least 'Status | Output'. Row: ${line}"
              return 1
         fi
 
@@ -355,9 +400,10 @@ matrix::runner::execute() {
 
         local args=()
         local args_display=""
-        local clean_line=""
+        local clean_line="${line#"${line%%[![:space:]]*}"}"
         local raw_val
         local val
+        local escaped_val
         local i
 
         # Parse Arguments (Columns 1 to N-2)
@@ -372,12 +418,13 @@ matrix::runner::execute() {
             val="${val%"${val##*[![:space:]]}"}"
 
             args+=("${val}")
-            args_display+="'${val}' "
-            clean_line+="${val} ${delimiter} "
+            # Single-quote arguments for readable, unambiguous failure reports.
+            escaped_val="${val//\'/\'\\\'\'}"
+            args_display+="'${escaped_val}' "
         done
 
         args_display="${args_display% }"
-        clean_line="${clean_line% "${delimiter}" }"
+        clean_line="${clean_line%"${clean_line##*[![:space:]]}"} (row ${row_number})"
 
         # Parse Expectations
         local expected_output="${parts[$idx_out]}"
@@ -391,12 +438,22 @@ matrix::runner::execute() {
         # Debug Mode - use :- to prevent nounset on MATRIX_DEBUG
         if [[ -n "${MATRIX_DEBUG:-}" ]]; then
             printf >&2 "DEBUG: run_matrix -> args:[%s] status:[%s] expect:[%s]\n" \
-                "${args[*]}" "${expected_status}" "${expected_output}"
+                "${args[*]-}" "${expected_status}" "${expected_output}"
         fi
 
-        # Validation: Ensure status is an integer
-        if [[ ! "${expected_status}" =~ ^[0-9]+$ ]]; then
-            fail "Error: Matrix column 'status' must be a positive integer. Got: '${expected_status}' in row: ${clean_line}"
+        # Validate bounds as text first, so neither octal parsing nor overflow can
+        # turn invalid expectations into passing tests.
+        if ! matrix::internal::valid_status "$expected_status"; then
+            fail "Error: Matrix column 'status' must be a decimal integer from 0 to 255. Got: '${expected_status}' in row: ${clean_line}"
+            return 1
+        fi
+        expected_status="${expected_status#"${expected_status%%[!0]*}"}"
+        expected_status="${expected_status:-0}"
+
+        # Validate a row's regex before executing a potentially side-effecting target.
+        if [[ "$expected_output" == '~'* ]] && ! matrix::internal::valid_regex "${expected_output:1}"; then
+            matrix::internal::fail "Invalid Regex" "$func_name" "$args_display" "$clean_line" \
+                "A valid extended regular expression" "${expected_output:1}"
             return 1
         fi
 
@@ -405,10 +462,23 @@ matrix::runner::execute() {
         # CRITICAL FIX: Redirect stdin to /dev/null to prevent the command from consuming the matrix heredoc
         # A bare 'run' that sees 127 raises bats warning BW01. When the row expects 127, state that
         # intent with 'run -127' (bats-core 1.5.0+) and leave the verdict to the assertions below.
-        if [[ "${expected_status}" -eq 127 ]]; then
-            run -127 "${func_name}" "${args[@]}" < /dev/null || true
+        # Clear old results so a broken run helper cannot reuse a previous row.
+        status=''
+        output=''
+        local run_result=0
+        # The guarded array expansion also works with nounset on Bash 4.0-4.3.
+        # '--' prevents command names from being interpreted as Bats options.
+        if [[ "${expected_status}" == 127 ]]; then
+            run -127 -- "${func_name}" ${args[@]+"${args[@]}"} < /dev/null || run_result=$?
         else
-            run "${func_name}" "${args[@]}" < /dev/null
+            run -- "${func_name}" ${args[@]+"${args[@]}"} < /dev/null || run_result=$?
+        fi
+        # run -127 returns nonzero for a captured status mismatch; report that
+        # through our status assertion. Other runner failures are infrastructure errors.
+        if [[ "$run_result" -ne 0 && ( "$expected_status" != 127 || -z "${status:-}" || "$status" == 127 ) ]]; then
+            matrix::internal::fail "Runner Failure" "$func_name" "$args_display" "$clean_line" \
+                "bats-core run to capture a result" "run returned ${run_result}" "${output:-}"
+            return 1
         fi
 
         # Assertions
@@ -425,7 +495,9 @@ matrix::runner::execute() {
 
     if [[ "${has_input}" -eq 0 ]]; then
         fail "Error: run_matrix called with no valid input lines."
+        return 1
     fi
+    return 0
 }
 
 #######################################
@@ -451,4 +523,3 @@ matrix::runner::execute() {
 run_matrix() {
     matrix::runner::execute "$@"
 }
-

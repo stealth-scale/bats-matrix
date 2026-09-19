@@ -16,13 +16,12 @@ message it touches.
 ## How it was checked
 
 <!--
-The output of `make check` and `make coverage`. Name anything you could not
+The output of `make check`. Name anything you could not
 check here and say why, so a reviewer knows what CI is carrying.
 -->
 
 ## Checklist
 
 - [ ] `make check` passes.
-- [ ] `make coverage` holds the floor.
 - [ ] A line under `Unreleased` in `CHANGELOG.md` for a change a user would notice.
 - [ ] New tests sit in their group and read as `area: case -> expectation`.

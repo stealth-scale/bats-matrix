@@ -6,13 +6,13 @@
 # Organized into the following groups:
 #   01. Core Execution (Rows, Return Codes, Bare Commands)
 #   02. Row Parsing - Basic (Trimming, Empty Fields, Blank Lines, Comments)
-#   03. Row Parsing - Advanced (Special Chars, Unicode, Quotes, CRLF, Pipes)
+#   03. Row Parsing - Advanced (Special Chars, Unicode, Quotes, CRLF, Pipes, EOF)
 #   04. Delimiters (Argument, Environment, Precedence)
 #   05. Output Assertions - Substring (Default Mode)
 #   06. Output Assertions - EMPTY
 #   07. Output Assertions - Regex (~)
 #   08. Output Assertions - Multiline (\n)
-#   09. Status Assertions
+#   09. Status Assertions (Boundaries, Decimal Values, Leading Zeros)
 #   10. Failure Reporting & Feedback
 #   11. Strict Mode & Compliance (errexit, nounset, IFS, Locale, Globals)
 #   12. Interactions (Functions, Binaries, Builtins, Stdin, Nested run)
@@ -135,7 +135,24 @@ EOM
 EOM
     [ "$status" -eq 1 ]
     run cat "${BATS_TEST_TMPDIR}/calls"
+    [ "$status" -eq 0 ]
     [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "called first" ]
+}
+
+@test "core: later failure -> earlier rows run, rows after the failure do not" {
+    run run_matrix record <<'EOM'
+        first  | 0 | EMPTY
+        second | 1 | EMPTY
+        third  | 0 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Status Mismatch"* ]]
+    run cat "${BATS_TEST_TMPDIR}/calls"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[0]}" = "called first" ]
+    [ "${lines[1]}" = "called second" ]
 }
 
 @test "core: repeat -> two matrices in one test do not share state" {
@@ -179,6 +196,13 @@ EOM
     run_matrix brackets <<'EOM'
           | b | 0 | [][b]
 EOM
+}
+
+@test "parse: adjacent empty fields -> each field remains a separate argument" {
+    run_matrix brackets <<'EOM'
+        | | middle | | 0 | [][][middle][]
+EOM
+    [ "$output" = "[][][middle][]" ]
 }
 
 @test "parse: blank lines -> skipped" {
@@ -281,12 +305,51 @@ EOM
     run_matrix brackets <<< "a | 0 | [a]"
 }
 
+@test "parse: EOF -> a single row without a final newline is executed" {
+    run_matrix record < <(printf '%s' 'last | 0 | EMPTY')
+    run cat "${BATS_TEST_TMPDIR}/calls"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "called last" ]
+}
+
+@test "parse: EOF -> a failing final row without a newline fails the matrix" {
+    run run_matrix brackets < <(printf '%s' $'first | 0 | [first]\nlast | 0 | [wrong]')
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Output Mismatch"* ]]
+    [[ "$output" == *"Actual      : [last]"* ]]
+}
+
+@test "parse: EOF -> an empty last column is preserved without a final newline" {
+    run_matrix record < <(printf '%s' 'last | 0 |')
+    run cat "${BATS_TEST_TMPDIR}/calls"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "called last" ]
+}
+
+@test "parse: EOF -> an unterminated comment does not add a call" {
+    run_matrix record < <(printf '%s' $'first | 0 | EMPTY\n# last comment')
+    run cat "${BATS_TEST_TMPDIR}/calls"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "called first" ]
+}
+
+@test "parse: EOF -> unterminated trailing whitespace does not add a call" {
+    run_matrix record < <(printf '%s' $'first | 0 | EMPTY\n \t ')
+    run cat "${BATS_TEST_TMPDIR}/calls"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "called first" ]
+}
+
 @test "parse: trailing delimiter -> documents that it shifts the columns and is rejected" {
     run run_matrix brackets <<'EOM'
         a | 0 | [a] |
 EOM
     [ "$status" -eq 1 ]
-    [[ "$output" == *"must be a positive integer"* ]]
+    [[ "$output" == *"must be a decimal integer from 0 to 255"* ]]
 }
 
 # ==============================================================================
@@ -350,6 +413,27 @@ EOM
 EOM
 }
 
+@test "delimiter: multiple characters -> rejected before running the command" {
+    run run_matrix record '||' <<'EOM'
+        unexpected | 0 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"delimiter must be one non-whitespace character"* ]]
+    [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
+}
+
+@test "delimiter: whitespace -> spaces, tabs and newlines are rejected" {
+    local delimiter
+    for delimiter in ' ' $'\t' $'\n'; do
+        run run_matrix record "$delimiter" <<'EOM'
+            unexpected | 0 | EMPTY
+EOM
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"delimiter must be one non-whitespace character"* ]]
+        [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
+    done
+}
+
 # ==============================================================================
 # GROUP 05: OUTPUT ASSERTIONS - SUBSTRING
 # ==============================================================================
@@ -363,6 +447,12 @@ EOM
 @test "substring: partial -> a substring of the output matches" {
     run_matrix brackets <<'EOM'
         abcdef | 0 | cde
+EOM
+}
+
+@test "substring: leading equals -> remains literal substring text" {
+    run_matrix brackets <<'EOM'
+        =value | 0 | =value
 EOM
 }
 
@@ -511,6 +601,16 @@ EOM
 EOM
 }
 
+@test "regex: invalid syntax -> a malformed expression fails with a diagnostic" {
+    run run_matrix brackets <<'EOM'
+        abc | 0 | ~ [
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"MATRIX TEST FAILED"* ]]
+    [[ "$output" == *"Regex"* ]]
+    [[ "$output" == *"["* ]]
+}
+
 # ==============================================================================
 # GROUP 08: OUTPUT ASSERTIONS - MULTILINE
 # ==============================================================================
@@ -603,6 +703,50 @@ EOM
 EOM
 }
 
+@test "status: leading zeros -> expected codes are compared as decimal values" {
+    run_matrix exit_with <<'EOM'
+        0   | 000   | EMPTY
+        8   | 08    | EMPTY
+        9   | 09    | EMPTY
+        10  | 010   | EMPTY
+        127 | 00127 | EMPTY
+        255 | 00255 | EMPTY
+EOM
+    [ "$status" -eq 255 ]
+    [ "$output" = "" ]
+}
+
+@test "status: leading zeros -> 08 against zero reports a status mismatch" {
+    run run_matrix exit_with <<'EOM'
+        0 | 08 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Status Mismatch"* ]]
+    [[ "$output" == *"Expected    : Exit Code '8'"* ]]
+    [[ "$output" == *"Actual      : Exit Code '0'"* ]]
+    [[ "$output" != *"value too great for base"* ]]
+}
+
+@test "status: leading zeros -> 010 does not match exit code 8" {
+    run run_matrix exit_with <<'EOM'
+        8 | 010 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Status Mismatch"* ]]
+    [[ "$output" == *"Expected    : Exit Code '10'"* ]]
+    [[ "$output" == *"Actual      : Exit Code '8'"* ]]
+}
+
+@test "status: boundaries -> every exit code from 0 through 255 matches" {
+    run_matrix exit_with < <(
+        for ((code=0; code<=255; code++)); do
+            printf '%d | %03d | EMPTY\n' "$code" "$code"
+        done
+    )
+    [ "$status" -eq 255 ]
+    [ "$output" = "" ]
+}
+
 # ==============================================================================
 # GROUP 10: FAILURE REPORTING & FEEDBACK
 # ==============================================================================
@@ -611,6 +755,7 @@ EOM
     run run_matrix brackets <<'EOM'
         a | 0 | [b]
 EOM
+    [ "$status" -eq 1 ]
     [[ "$output" == *"================================================================================"* ]]
     [[ "$output" == *"✖ MATRIX TEST FAILED"* ]]
     [[ "$output" == *"Context:"* ]]
@@ -621,6 +766,7 @@ EOM
     run run_matrix brackets <<'EOM'
         hello | big world | 0 | nope
 EOM
+    [ "$status" -eq 1 ]
     [[ "$output" == *"Command     : brackets 'hello' 'big world'"* ]]
 }
 
@@ -629,6 +775,7 @@ EOM
         a | 0 | [a]
         hello | world | 0 | nope
 EOM
+    [ "$status" -eq 1 ]
     [[ "$output" == *"Input Row   : hello | world"* ]]
     [[ "$output" != *"Input Row   : a"* ]]
 }
@@ -637,6 +784,7 @@ EOM
     run run_matrix brackets ';' <<'EOM'
         hello ; world ; 0 ; nope
 EOM
+    [ "$status" -eq 1 ]
     [[ "$output" == *"Input Row   : hello ; world"* ]]
 }
 
@@ -644,6 +792,7 @@ EOM
     run run_matrix noisy_fail <<'EOM'
         0 | EMPTY
 EOM
+    [ "$status" -eq 1 ]
     [[ "$output" == *"Output Log  :"* ]]
     [[ "$output" == *"    boom happened"* ]]
 }
@@ -652,6 +801,7 @@ EOM
     run run_matrix two_lines <<'EOM'
         0 | nothing like this
 EOM
+    [ "$status" -eq 1 ]
     [[ "$output" == *"Actual      : "$'\n'"                  line one"$'\n'"                  line two"* ]]
 }
 
@@ -660,6 +810,7 @@ EOM
         a | 0 | [x]
         b | 0 | [y]
 EOM
+    [ "$status" -eq 1 ]
     local count
     count=$(grep -c "MATRIX TEST FAILED" <<< "$output")
     [ "$count" -eq 1 ]
@@ -693,6 +844,58 @@ EOM
     run -1 env -i HOME="$HOME" PATH="$PATH" "${BATS_ROOT:+${BATS_ROOT}/bin/}bats" "${BATS_TEST_TMPDIR}/consumer.bats"
     [[ "$output" == *"not ok 1 consumer"* ]]
     [[ "$output" == *"Status Mismatch"* ]]
+    [[ "$output" != *"reached after failure"* ]]
+}
+
+@test "compliance: errexit -> a failing unterminated row fails the calling test" {
+    # shellcheck disable=SC2016  # the generated test expands its own library path
+    printf '%s\n' \
+        'load "$MATRIX_LIBRARY"' \
+        '@test "consumer" {' \
+        '    set -Euoe pipefail' \
+        '    run_matrix true < <(printf "0 | EMPTY\n1 | EMPTY")' \
+        '    echo "reached after failure"' \
+        '}' \
+        > "${BATS_TEST_TMPDIR}/consumer.bats"
+    run -1 env -i HOME="$HOME" PATH="$PATH" MATRIX_LIBRARY="$BATS_TEST_DIRNAME/../load.bash" \
+        "${BATS_ROOT:+${BATS_ROOT}/bin/}bats" "${BATS_TEST_TMPDIR}/consumer.bats"
+    [[ "$output" == *"not ok 1 consumer"* ]]
+    [[ "$output" == *"Status Mismatch"* ]]
+    [[ "$output" != *"reached after failure"* ]]
+}
+
+@test "compliance: errexit -> an 08 status mismatch fails the calling test" {
+    # shellcheck disable=SC2016  # the generated test expands its own library path
+    printf '%s\n' \
+        'load "$MATRIX_LIBRARY"' \
+        '@test "consumer" {' \
+        '    set -Euoe pipefail' \
+        '    run_matrix true <<< "08 | EMPTY"' \
+        '    echo "reached after failure"' \
+        '}' \
+        > "${BATS_TEST_TMPDIR}/consumer.bats"
+    run -1 env -i HOME="$HOME" PATH="$PATH" MATRIX_LIBRARY="$BATS_TEST_DIRNAME/../load.bash" \
+        "${BATS_ROOT:+${BATS_ROOT}/bin/}bats" "${BATS_TEST_TMPDIR}/consumer.bats"
+    [[ "$output" == *"not ok 1 consumer"* ]]
+    [[ "$output" == *"Status Mismatch"* ]]
+    [[ "$output" != *"value too great for base"* ]]
+    [[ "$output" != *"reached after failure"* ]]
+}
+
+@test "compliance: errexit -> an overflowing status fails the calling test" {
+    # shellcheck disable=SC2016  # the generated test expands its own library path
+    printf '%s\n' \
+        'load "$MATRIX_LIBRARY"' \
+        '@test "consumer" {' \
+        '    set -Euoe pipefail' \
+        '    run_matrix true <<< "18446744073709551616 | EMPTY"' \
+        '    echo "reached after failure"' \
+        '}' \
+        > "${BATS_TEST_TMPDIR}/consumer.bats"
+    run -1 env -i HOME="$HOME" PATH="$PATH" MATRIX_LIBRARY="$BATS_TEST_DIRNAME/../load.bash" \
+        "${BATS_ROOT:+${BATS_ROOT}/bin/}bats" "${BATS_TEST_TMPDIR}/consumer.bats"
+    [[ "$output" == *"not ok 1 consumer"* ]]
+    [[ "$output" == *"Matrix column 'status'"* ]]
     [[ "$output" != *"reached after failure"* ]]
 }
 
@@ -871,7 +1074,7 @@ EOM
         a | ok | [a]
 EOM
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Matrix column 'status' must be a positive integer. Got: 'ok'"* ]]
+    [[ "$output" == *"Matrix column 'status' must be a decimal integer from 0 to 255. Got: 'ok'"* ]]
     [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
 }
 
@@ -880,7 +1083,7 @@ EOM
         a | -1 | [a]
 EOM
     [ "$status" -eq 1 ]
-    [[ "$output" == *"must be a positive integer"* ]]
+    [[ "$output" == *"must be a decimal integer from 0 to 255"* ]]
 }
 
 @test "error: status column -> empty status is rejected" {
@@ -888,7 +1091,59 @@ EOM
         a |  | [a]
 EOM
     [ "$status" -eq 1 ]
-    [[ "$output" == *"must be a positive integer"* ]]
+    [[ "$output" == *"must be a decimal integer from 0 to 255"* ]]
+}
+
+@test "error: status column -> 256 is rejected before executing the command" {
+    run run_matrix record <<'EOM'
+        unexpected | 256 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"decimal integer from 0 to 255"* ]]
+    [[ "$output" == *"Got: '256'"* ]]
+    [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
+}
+
+@test "error: status column -> overflowing values cannot wrap around to zero" {
+    run run_matrix record <<'EOM'
+        unexpected | 18446744073709551616 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"decimal integer from 0 to 255"* ]]
+    [[ "$output" == *"Got: '18446744073709551616'"* ]]
+    [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
+}
+
+@test "error: status column -> arithmetic expressions are rejected as text" {
+    run run_matrix record <<'EOM'
+        unexpected | 1+1 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Got: '1+1'"* ]]
+    [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
+}
+
+@test "error: status column -> hexadecimal notation is rejected" {
+    run run_matrix record <<'EOM'
+        unexpected | 0x10 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Got: '0x10'"* ]]
+    [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
+}
+
+@test "error: later invalid row -> earlier rows run, invalid and later rows do not" {
+    run run_matrix record <<'EOM'
+        first   | 0   | EMPTY
+        invalid | 256 | EMPTY
+        last    | 0   | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Got: '256'"* ]]
+    run cat "${BATS_TEST_TMPDIR}/calls"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "called first" ]
 }
 
 @test "error: columns -> a row with a single column is rejected" {
@@ -914,12 +1169,28 @@ EOM
     [[ "$output" == *"no valid input lines"* ]]
 }
 
+@test "error: input -> an unterminated comment alone is an error" {
+    run run_matrix record < <(printf '%s' '# no rows')
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no valid input lines"* ]]
+    [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
+}
+
 @test "error: command -> a missing command name is an error" {
     run run_matrix <<'EOM'
         0 | EMPTY
 EOM
     [ "$status" -eq 1 ]
     [[ "$output" == *"requires a function name"* ]]
+}
+
+@test "error: arguments -> extra runner arguments are rejected before execution" {
+    run run_matrix record '|' unexpected <<'EOM'
+        unexpected | 0 | EMPTY
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"usage: run_matrix COMMAND [DELIMITER]"* ]]
+    [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
 }
 
 @test "error: command -> an unknown command is a normal 127 row, without bats warning BW01" {
@@ -959,6 +1230,33 @@ EOM
     [[ "$output" == *"requires 'run' (bats-core)"* ]]
 }
 
+@test "guard: run failure -> stale results cannot turn a broken run into a pass" {
+    # shellcheck disable=SC2016  # the replacement run exists only in the child bash
+    run bash -euo pipefail -c '
+        source "$1"
+        run() { return 2; }
+        status=0
+        output=stale
+        run_matrix true <<< "0 | stale" || exit $?
+    ' _ "$BATS_TEST_DIRNAME/../src/matrix.bash"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"MATRIX TEST FAILED: Runner Failure"* ]]
+    [[ "$output" == *"run returned 2"* ]]
+    [[ "$output" != *"Output Log"* ]]
+}
+
+@test "guard: run failure -> expecting 127 does not hide an infrastructure error" {
+    # shellcheck disable=SC2016  # the replacement run exists only in the child bash
+    run bash -euo pipefail -c '
+        source "$1"
+        run() { return 2; }
+        run_matrix true <<< "127 | EMPTY"
+    ' _ "$BATS_TEST_DIRNAME/../src/matrix.bash"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"MATRIX TEST FAILED: Runner Failure"* ]]
+    [[ "$output" == *"run returned 2"* ]]
+}
+
 @test "guard: fail polyfill -> fail exists, prints to stderr and returns 1" {
     declare -F fail > /dev/null
     run --separate-stderr fail "polyfilled failure"
@@ -967,11 +1265,46 @@ EOM
     [ "$stderr" = "polyfilled failure" ]
 }
 
+@test "guard: fail polyfill -> leading flags and backslashes are printed literally" {
+    run --separate-stderr fail '-n' '\t'
+    [ "$status" -eq 1 ]
+    [ "$output" = "" ]
+    [ "$stderr" = '-n \t' ]
+}
+
 @test "guard: load -> loading the file twice is harmless" {
     load "$BATS_TEST_DIRNAME/../src/matrix.bash"
     run_matrix brackets <<'EOM'
         a | 0 | [a]
 EOM
+}
+
+@test "guard: load -> sourcing the library twice is silent under strict mode" {
+    # shellcheck disable=SC2016  # the source path is passed to the child bash
+    run --separate-stderr bash -euo pipefail -c 'source "$1"; source "$1"' \
+        _ "$BATS_TEST_DIRNAME/../src/matrix.bash"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ "$stderr" = "" ]
+}
+
+@test "guard: load -> the public loader is silent on repeated loads" {
+    # shellcheck disable=SC2016  # the source path is passed to the child bash
+    run --separate-stderr bash -euo pipefail -c 'source "$1"; source "$1"' \
+        _ "$BATS_TEST_DIRNAME/../load.bash"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ "$stderr" = "" ]
+}
+
+@test "guard: fail polyfill -> an existing fail helper is preserved without output" {
+    # shellcheck disable=SC2016  # the function and its arguments belong to the child bash
+    run --separate-stderr bash -euo pipefail -c \
+        'fail() { printf "existing:%s\n" "$*" >&2; return 1; }; source "$1"; fail message' \
+        _ "$BATS_TEST_DIRNAME/../load.bash"
+    [ "$status" -eq 1 ]
+    [ "$output" = "" ]
+    [ "$stderr" = "existing:message" ]
 }
 
 # ==============================================================================
@@ -986,12 +1319,36 @@ EOM
     [[ "$output" == *"some output"* ]]
 }
 
+@test "whitebox: assert::status -> a missing actual status cannot equal zero" {
+    run matrix::assert::status 0 "" "cmd" "" "row" ""
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Invalid Status"* ]]
+}
+
+@test "whitebox: assert::status -> overflowing expected and actual values are rejected" {
+    run matrix::assert::status 18446744073709551616 0 "cmd" "" "row" ""
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Invalid Status"* ]]
+    run matrix::assert::status 0 18446744073709551616 "cmd" "" "row" ""
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Invalid Status"* ]]
+}
+
 @test "whitebox: assert::output -> dispatches EMPTY, regex, multiline and substring" {
     matrix::assert::output "EMPTY" "" "cmd" "" "row"
     matrix::assert::output "" "" "cmd" "" "row"
     matrix::assert::output "~ ^ab" "abc" "cmd" "" "row"
     matrix::assert::output 'a\nb' $'a\nb' "cmd" "" "row"
     matrix::assert::output "b" "abc" "cmd" "" "row"
+}
+
+@test "whitebox: assert::output -> an invalid regex is rejected with context" {
+    run matrix::assert::output '~ [' 'abc' 'cmd' "'arg'" 'input row'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"MATRIX TEST FAILED: Invalid Regex"* ]]
+    [[ "$output" == *"Input Row   : input row"* ]]
+    [[ "$output" == *"Command     : cmd 'arg'"* ]]
+    [[ "$output" == *"Actual      : ["* ]]
 }
 
 @test "whitebox: assert::output -> each mode reports its own failure type" {
@@ -1035,6 +1392,7 @@ EOM
 
 @test "whitebox: internal::fail -> indents a multi-line actual value" {
     run matrix::internal::fail "Custom Type" "cmd" "" "" "e" $'first\nsecond'
+    [ "$status" -eq 1 ]
     [[ "$output" == *"                  first"$'\n'"                  second"* ]]
 }
 
