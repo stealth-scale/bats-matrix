@@ -129,18 +129,23 @@ matrix::internal::fail() {
         block_log=$'\n'"${line_log_label}"$'\n'$'\n'"${indented_log}"
     fi
 
-    fail "
-================================================================================
-  ✖ MATRIX TEST FAILED: ${failure_type}
-================================================================================
-  Context:
-    Input Row   : ${raw_line}
-    Command     : ${func_name} ${args_str}
-
-  Assertion:
-${line_expected}
-${line_actual}${block_log}
-================================================================================"
+    # Keep message text separate from shell syntax for line-based instrumentation.
+    local rule='================================================================================'
+    local report
+    printf -v report '%s\n' \
+        '' \
+        "${rule}" \
+        "  ✖ MATRIX TEST FAILED: ${failure_type}" \
+        "${rule}" \
+        '  Context:' \
+        "    Input Row   : ${raw_line}" \
+        "    Command     : ${func_name} ${args_str}" \
+        '' \
+        '  Assertion:' \
+        "${line_expected}" \
+        "${line_actual}${block_log}" \
+        "${rule}"
+    fail "${report%$'\n'}"
 }
 
 #######################################
