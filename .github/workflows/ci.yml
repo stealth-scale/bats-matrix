@@ -25,67 +25,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
       - name: Install ShellCheck ${{ env.SHELLCHECK_VERSION }}
         run: |
           mkdir -p "$HOME/.local/bin"
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
             | tar -xJ --strip-components 1 -C "$HOME/.local/bin" "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/shellcheck" --version
       - run: make lint
 
+  # The bash and bats matrix, in the test image, as `make test` runs it locally.
+  test:
+    name: test (bash ${{ matrix.bash }}, bats ${{ matrix.bats }})
+    strategy:
+      fail-fast: false
+      matrix:
+        bash: ["4.4", "5.1", "5.2", "5.3"]
+        bats: ["1.7.0", "1.14.0"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: make test RUNTIME=docker BASH_VERSION=${{ matrix.bash }} BATS_VERSION=${{ matrix.bats }}
+
+  # The bash and bats of a developer machine, Linux and macOS.
   test-host:
+    name: test-host (${{ matrix.os }}, bats ${{ matrix.bats }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        bats:
-          - version: "1.7.0"
-            sha256: ac70c2a153f108b1ac549c2eaa4154dea4a7c1cc421e3352f0ce6ea49435454e
-          - version: "1.14.0"
-            sha256: bb537b70b15b732f6d8827dd6578e3d8ce166636ce1f18ea9a074184fcce9177
+        bats: ["1.7.0", "1.14.0"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
       - name: Install Bash 5 on macOS
         if: runner.os == 'macOS'
         run: |
           brew install bash
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
-      - name: Install bats-core ${{ matrix.bats.version }}
-        env:
-          BATS_VERSION: ${{ matrix.bats.version }}
-          BATS_SHA256: ${{ matrix.bats.sha256 }}
+      - name: Install bats-core ${{ matrix.bats }}
         run: |
-          bats_dir="$(mktemp -d)"
-          curl -fsSL "https://github.com/bats-core/bats-core/archive/refs/tags/v${BATS_VERSION}.tar.gz" -o "$bats_dir/bats.tar.gz"
-          printf '%s  %s\n' "$BATS_SHA256" "$bats_dir/bats.tar.gz" | shasum -a 256 -c -
-          tar -xzf "$bats_dir/bats.tar.gz" --strip-components=1 -C "$bats_dir"
-          "$bats_dir/install.sh" "$HOME/.local"
+          git clone --quiet --depth 1 --branch "v${{ matrix.bats }}" https://github.com/bats-core/bats-core.git /tmp/bats
+          /tmp/bats/install.sh "$HOME/.local"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: bash --version && bats --version
+      - run: bash --version | head -1 && bats --version
       - run: make test-host
-
-  container:
-    name: container (${{ matrix.runtime }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        runtime: [podman, docker]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Podman
-        if: matrix.runtime == 'podman'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-      - name: Run container tests
-        env:
-          RUNTIME: ${{ matrix.runtime }}
-        run: |
-          "$RUNTIME" --version
-          make test

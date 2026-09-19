@@ -141,13 +141,14 @@ and returns 1 when it is not.
 ## Working here
 
 ```sh
-make check      # shellcheck, then container tests
-make test       # tests in the official Bats image; RUNTIME defaults to podman
-make test-host  # tests locally; BATS and BATS_FLAGS override the defaults
-make lint       # shellcheck over the loader, the sources and the tests
+make test                                   # the suite in the test image: bash 5.2, bats 1.14.0
+make test BASH_VERSION=4.4 BATS_VERSION=1.7.0
+make test-host                              # the suite with the bash and bats of this machine
+make lint                                   # shellcheck over the loader, the sources and the tests
+make check                                  # what CI runs: lint, then test
 ```
 
-Use `make test RUNTIME=docker` for Docker, or `TARGET=tests/matrix.bats` to select a file.
+`RUNTIME=docker` selects Docker. The default is Podman. `TARGET` selects one test file.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 

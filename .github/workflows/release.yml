@@ -1,6 +1,7 @@
-# Publishes a GitHub release for a version tag, with the matching CHANGELOG.md entry as
-# its notes. The tag is pushed by hand after the changelog entry is on main; see
-# CONTRIBUTING.md. A tag without an entry fails here rather than releasing without notes.
+# Publishes a GitHub release for a version tag, with the matching CHANGELOG.md entry
+# as its notes, after the ci workflow has passed on the tag. The tag is pushed by
+# hand after the changelog entry is on main; see CONTRIBUTING.md. A tag without an
+# entry fails here rather than releasing without notes.
 name: release
 
 on:
@@ -21,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
       - name: Extract the changelog entry
         run: |
           version="${GITHUB_REF_NAME#v}"

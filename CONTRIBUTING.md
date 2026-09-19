@@ -2,14 +2,10 @@
 
 ## Getting set up
 
-You need Bash 4 or later, [ShellCheck](https://www.shellcheck.net), GNU make and
-Podman or Docker. `make test` uses the official Bats image; no image build is needed.
-For `make test-host`, install [bats-core](https://github.com/bats-core/bats-core) 1.7.0 or later.
-
-```sh
-sudo dnf install bats ShellCheck make      # Fedora
-brew install bats-core shellcheck          # macOS, with Homebrew's bash on PATH
-```
+You need GNU make, [ShellCheck](https://www.shellcheck.net) and Podman or Docker.
+`make test` builds a small image from `tests/Containerfile` with the bash and bats-core
+versions it is given. For `make test-host`, install Bash 4 or later and
+[bats-core](https://github.com/bats-core/bats-core) 1.7.0 or later.
 
 ```sh
 git clone git@github.com:stealth-scale/bats-matrix.git
@@ -21,16 +17,15 @@ make check
 
 ```sh
 make lint       # shellcheck over the loader, the sources and the tests
-make test       # the test suite in the official Bats container
-make test-host  # the test suite with the local Bats and Bash
-make check      # lint and container tests
+make test       # the suite in the test image; BASH_VERSION and BATS_VERSION pick the cell
+make test-host  # the suite with the bash and bats of this machine
+make check      # what CI runs: lint, then test
 ```
 
-Use `RUNTIME=docker` for Docker; the default is Podman. `TARGET` selects one test file
-or directory, and `IMAGE` overrides the official Bats image.
+`RUNTIME=docker` selects Docker. The default is Podman. `TARGET` selects one test file.
 
-CI runs `make lint`, `make test-host` on Ubuntu and macOS with bats-core 1.7.0 and
-1.14.0, and `make test` on Ubuntu with both Podman and Docker.
+CI runs `make lint`, `make test` for bash 4.4, 5.1, 5.2 and 5.3 against bats-core 1.7.0 and
+1.14.0, and `make test-host` on Ubuntu and macOS with both bats-core versions.
 
 ## A change to the runner
 
