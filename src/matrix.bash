@@ -377,7 +377,7 @@ matrix::runner::execute() {
         done
 
         args_display="${args_display% }"
-        clean_line="${clean_line% ${delimiter} }"
+        clean_line="${clean_line% "${delimiter}" }"
 
         # Parse Expectations
         local expected_output="${parts[$idx_out]}"

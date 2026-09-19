@@ -82,13 +82,6 @@ record() { echo "called $*" >> "${BATS_TEST_TMPDIR}/calls"; }
 # A command that uses bats' run itself.
 uses_run() { run false; echo "inner status ${status}"; }
 
-# Runs a failing matrix under errexit and reports whether execution continued.
-under_errexit() {
-    set -e
-    run_matrix brackets <<< "a | 1 | [a]"
-    echo "reached after failure"
-}
-
 # Removes bats' run inside the subshell that the outer run provides.
 without_run() { unset -f run; run_matrix brackets <<< "a | 0 | [a]"; }
 
@@ -301,6 +294,7 @@ EOM
 # ==============================================================================
 
 @test "delimiter: default -> pipe, set when the file is sourced" {
+    # shellcheck disable=SC2016  # the script runs in the child bash
     run env -u BATS_MATRIX_DELIMITER bash -c 'source "$1"; printf "%s" "$BATS_MATRIX_DELIMITER"' \
         _ "$BATS_TEST_DIRNAME/../src/matrix.bash"
     [ "$status" -eq 0 ]
@@ -682,9 +676,22 @@ EOM
     shopt -qo pipefail
 }
 
-@test "compliance: errexit -> a failing row aborts the caller" {
-    run under_errexit
-    [ "$status" -eq 1 ]
+@test "compliance: errexit -> a failing row fails the calling test and prints the report" {
+    # A consumer's test body, loaded through load.bash, in a bats process of its own:
+    # bats sets errexit there, so the failing row must end the test before the echo.
+    # The file is assembled with printf because bats' preprocessor would otherwise
+    # read a @test line inside a heredoc as a test of this file.
+    printf '%s\n' \
+        "load '${BATS_TEST_DIRNAME}/../load'" \
+        'brackets() { printf "[%s]" "$@"; }' \
+        '@test "consumer" {' \
+        '    run_matrix brackets <<< "a | 1 | [a]"' \
+        '    echo "reached after failure"' \
+        '}' \
+        > "${BATS_TEST_TMPDIR}/consumer.bats"
+    # env -i: the inner bats must not inherit the outer run's BATS_* variables.
+    run -1 env -i HOME="$HOME" PATH="$PATH" "${BATS_ROOT:+${BATS_ROOT}/bin/}bats" "${BATS_TEST_TMPDIR}/consumer.bats"
+    [[ "$output" == *"not ok 1 consumer"* ]]
     [[ "$output" == *"Status Mismatch"* ]]
     [[ "$output" != *"reached after failure"* ]]
 }
