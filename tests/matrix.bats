@@ -1396,6 +1396,77 @@ EOM
     [[ "$output" == *"                  first"$'\n'"                  second"* ]]
 }
 
+@test "whitebox: internal::fail -> preserves the complete single-line report" {
+    local expected
+    expected=$(cat <<'EOM'
+
+================================================================================
+  ✖ MATRIX TEST FAILED: Custom Type
+================================================================================
+  Context:
+    Input Row   : a | b
+    Command     : cmd 'a' 'b'
+
+  Assertion:
+    Expected    : the expectation
+    Actual      : the actual
+================================================================================
+EOM
+)
+    run matrix::internal::fail 'Custom Type' cmd "'a' 'b'" 'a | b' 'the expectation' 'the actual'
+    [ "$status" -eq 1 ]
+    [ "$output" = "$expected" ]
+}
+
+@test "whitebox: internal::fail -> preserves multiline values and log indentation" {
+    local expected
+    expected=$(cat <<'EOM'
+
+================================================================================
+  ✖ MATRIX TEST FAILED: Custom Type
+================================================================================
+  Context:
+    Input Row   : row
+    Command     : cmd arg
+
+  Assertion:
+    Expected    : expected
+    Actual      :
+                  first
+                  second
+    Output Log  :
+
+    log one
+    log two
+================================================================================
+EOM
+)
+    # The empty first line of a multiline actual value retains its separator space.
+    expected=${expected/Actual      :/Actual      : }
+    run matrix::internal::fail 'Custom Type' cmd arg row expected $'first\nsecond' $'log one\nlog two'
+    [ "$status" -eq 1 ]
+    [ "$output" = "$expected" ]
+}
+
+@test "whitebox: internal::fail -> forwards one literal message and the fail helper status" {
+    # shellcheck disable=SC2329  # called indirectly by internal::fail inside run
+    fail() {
+        [ "$#" -eq 1 ] || return 99
+        printf '%s\n' "$1"
+        return 7
+    }
+    # shellcheck disable=SC2016  # diagnostic values must remain literal
+    local literal='100% %s %n \\n $(false) `false`'
+    run matrix::internal::fail "$literal" cmd "$literal" "$literal" "$literal" "$literal" "$literal"
+    [ "$status" -eq 7 ]
+    [[ "$output" == *"MATRIX TEST FAILED: $literal"* ]]
+    [[ "$output" == *"Input Row   : $literal"* ]]
+    [[ "$output" == *"Command     : cmd $literal"* ]]
+    [[ "$output" == *"Expected    : $literal"* ]]
+    [[ "$output" == *"Actual      : $literal"* ]]
+    [[ "$output" == *"    $literal"* ]]
+}
+
 # ==============================================================================
 # GROUP 18: SCALE
 # ==============================================================================
