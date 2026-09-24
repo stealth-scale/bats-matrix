@@ -13,7 +13,7 @@
 #   - Scoped IFS handling (prevents leaking delimiters to commands).
 #
 # Usage:
-#   load "lib/matrix.bash"
+#   load 'helpers/bats-matrix/load'
 #
 #   # arg1 | arg2 | status | output
 #   run_matrix "my_command" <<EOM
@@ -129,7 +129,6 @@ matrix::internal::fail() {
         block_log=$'\n'"${line_log_label}"$'\n'$'\n'"${indented_log}"
     fi
 
-    # Keep message text separate from shell syntax for line-based instrumentation.
     local rule='================================================================================'
     local report
     printf -v report '%s\n' \

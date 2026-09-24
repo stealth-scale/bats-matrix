@@ -120,8 +120,9 @@ DEBUG: run_matrix -> args:[Hello World] status:[0] expect:[hello-world]
 
 - A first argument cannot start with `#`. The row reads as a comment.
 - The literal text `EMPTY` cannot be asserted. The word is the keyword for no output.
-- A trailing delimiter adds an empty last column, which shifts the status column and is
-  rejected.
+- A trailing delimiter adds an empty last column. The columns shift by one, so the output
+  column is read as the status: the row is rejected, or fails, instead of running as
+  written.
 - A row that expects exit status 127 runs through `run -127`, so bats does not raise warning
   BW01 for it. Any other row that hits 127 does raise it, which is what you want for a
   misspelt command.
