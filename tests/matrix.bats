@@ -611,6 +611,20 @@ EOM
     [[ "$output" == *"["* ]]
 }
 
+@test "regex: invalid syntax -> the row's command does not run" {
+    # '+x' and '*x' compile only with the space after the tilde in front of them,
+    # so the check before the run trims that space as the assertion does.
+    local regex
+    for regex in '~ [' '~ +x' '~ *x' '~+x'; do
+        run run_matrix record <<EOM
+        unexpected | 0 | ${regex}
+EOM
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"MATRIX TEST FAILED: Invalid Regex"* ]]
+        [ ! -f "${BATS_TEST_TMPDIR}/calls" ]
+    done
+}
+
 # ==============================================================================
 # GROUP 08: OUTPUT ASSERTIONS - MULTILINE
 # ==============================================================================

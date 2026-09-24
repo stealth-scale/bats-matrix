@@ -456,10 +456,16 @@ matrix::runner::execute() {
         expected_status="${expected_status:-0}"
 
         # Validate a row's regex before executing a potentially side-effecting target.
-        if [[ "$expected_output" == '~'* ]] && ! matrix::internal::valid_regex "${expected_output:1}"; then
-            matrix::internal::fail "Invalid Regex" "$func_name" "$args_display" "$clean_line" \
-                "A valid extended regular expression" "${expected_output:1}"
-            return 1
+        # The whitespace after the tilde is trimmed here as matrix::assert::output trims it:
+        # '+x' does not compile, ' +x' does.
+        if [[ "$expected_output" == '~'* ]]; then
+            local row_regex="${expected_output:1}"
+            row_regex="${row_regex#"${row_regex%%[![:space:]]*}"}"
+            if ! matrix::internal::valid_regex "$row_regex"; then
+                matrix::internal::fail "Invalid Regex" "$func_name" "$args_display" "$clean_line" \
+                    "A valid extended regular expression" "$row_regex"
+                return 1
+            fi
         fi
 
         # Execution via bats-core 'run'
