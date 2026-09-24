@@ -6,6 +6,14 @@ Every change a user would notice is recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-24
+
+### Fixed
+
+- A row with an invalid `~` regex does not run its command, whatever the whitespace after
+  the tilde. The check before the run read `~ +x` as ` +x`, which compiles, so the command
+  ran and the row failed afterwards on `+x`, which does not.
+
 ## [1.0.0] - 2026-09-19
 
 First tagged release.
@@ -40,5 +48,6 @@ First tagged release.
   from the table's stdin.
 - Failure reports include the source row number and quote arguments unambiguously.
 
-[Unreleased]: https://github.com/stealth-scale/bats-matrix/compare/v1.0.0...main
+[Unreleased]: https://github.com/stealth-scale/bats-matrix/compare/v1.0.1...main
+[1.0.1]: https://github.com/stealth-scale/bats-matrix/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/stealth-scale/bats-matrix/releases/tag/v1.0.0
