@@ -85,6 +85,31 @@ uses_run() { run false; echo "inner status ${status}"; }
 # Removes bats' run inside the subshell that the outer run provides.
 without_run() { unset -f run; run_matrix brackets <<< "a | 0 | [a]"; }
 
+# Defines a function for every command on PATH, as a mock does when it shadows a
+# command. Each function runs the real command. A call from a function of
+# matrix.bash also appends the name of the command to $BATS_TEST_TMPDIR/shadowed.
+shadow_path_commands() {
+    local name file
+    local -A skip=()
+    declare -gA shadow_library=()
+    shopt -s extdebug
+    while read -r _ _ name; do
+        read -r _ _ file < <(declare -F "$name")
+        # shellcheck disable=SC2034  # read by the functions that the eval below defines
+        [[ "$file" != */src/matrix.bash ]] || shadow_library["x$name"]=1
+    done < <(declare -F)
+    shopt -u extdebug
+    while IFS= read -r name; do skip["x$name"]=1; done < <(compgen -b; compgen -k; compgen -A function; compgen -a)
+    while IFS= read -r name; do
+        [[ -z "${skip["x$name"]-}" && "$name" =~ ^[A-Za-z0-9_][A-Za-z0-9_.+-]*$ ]] || continue
+        skip["x$name"]=1
+        eval "$name() {
+            [[ -z \"\${shadow_library[x\${FUNCNAME[1]-}]-}\" ]] || builtin printf '%s\n' '$name' >> \"\$BATS_TEST_TMPDIR/shadowed\"
+            command $name \"\$@\"
+        }"
+    done < <(compgen -c)
+}
+
 # ==============================================================================
 # GROUP 01: CORE EXECUTION
 # ==============================================================================
@@ -817,6 +842,21 @@ EOM
 EOM
     [ "$status" -eq 1 ]
     [[ "$output" == *"Actual      : "$'\n'"                  line one"$'\n'"                  line two"* ]]
+}
+
+@test "report: commands on PATH shadowed by functions -> the report calls the real sed" {
+    shadow_path_commands
+    run run_matrix noisy_fail <<'EOM'
+        0 | boom happened
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Output Log"*"    boom happened"* ]]
+    run run_matrix two_lines <<'EOM'
+        0 | three
+EOM
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"                  line one"* ]]
+    [[ ! -e "$BATS_TEST_TMPDIR/shadowed" ]] || { printf 'called as functions: %s\n' "$(< "$BATS_TEST_TMPDIR/shadowed")"; false; }
 }
 
 @test "report: first failure only -> one report per matrix" {

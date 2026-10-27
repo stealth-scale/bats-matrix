@@ -126,7 +126,7 @@ matrix::internal::fail() {
     # Format multi-line actual values with indentation
     if [[ "${actual_val}" == *$'\n'* ]]; then
         # Use printf to avoid 'echo' interpreting flags like -n or -e
-        formatted_actual=$'\n'"$(printf '%s' "${actual_val}" | sed "s/^/${val_indent}/")"
+        formatted_actual=$'\n'"$(printf '%s' "${actual_val}" | command sed "s/^/${val_indent}/")"
     else
         formatted_actual="${actual_val}"
     fi
@@ -140,7 +140,7 @@ matrix::internal::fail() {
     if [[ -n "${extra_log}" ]]; then
         local log_indent="    "
         local indented_log
-        indented_log="$(printf '%s' "${extra_log}" | sed "s/^/${log_indent}/")"
+        indented_log="$(printf '%s' "${extra_log}" | command sed "s/^/${log_indent}/")"
 
         local line_log_label
         printf -v line_log_label "    %-${label_width}s:" "Output Log"
