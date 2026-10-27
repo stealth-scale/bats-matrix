@@ -6,6 +6,14 @@ Every change a user would notice is recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The `fail` polyfill prints its stdin when it has no arguments, as bats-support's `fail`
+  does. A suite that loaded bats-matrix before bats-expect without bats-support printed an
+  empty report for every failed bats-expect assertion.
+- The failure report calls `sed` through `command`, so a test that mocks `sed` with a
+  function does not change the report.
+
 ## [1.0.1] - 2026-09-24
 
 ### Fixed

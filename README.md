@@ -137,8 +137,9 @@ DEBUG: run_matrix -> args:[Hello World] status:[0] expect:[hello-world]
 | `MATRIX_DEBUG`                         | When non-empty, prints every row to stderr before it runs               |
 | `matrix::internal::require_bash4 [N]`  | Fails when the major version `N`, or the running shell's, is under 4    |
 
-`fail` comes from bats-support when it is loaded, and from a polyfill that prints to stderr
-and returns 1 when it is not.
+`fail` comes from bats-support when it is loaded. Otherwise the library defines a polyfill
+with the same contract. The polyfill prints its arguments to stderr, or its stdin when it has
+no arguments. It returns 1.
 
 ## Working here
 
