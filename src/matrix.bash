@@ -23,10 +23,28 @@
 # Default delimiter. Uses := to safely set if unset/null, compliant with set -u.
 : "${BATS_MATRIX_DELIMITER:=|}"
 
-# Polyfill the fail function
 if ! declare -F fail >/dev/null; then
+    #######################################
+    # Prints a failure message to stderr and returns 1. The message is the
+    # arguments, or stdin when there are none. bats-support's fail has the same
+    # contract, so a library that pipes its report into fail works with either.
+    #
+    # Arguments:
+    #   $@ (Strings) - (Optional) The message. Read from stdin when absent
+    # Outputs:
+    #   The message, on stderr
+    # Returns:
+    #   1 - Always
+    #######################################
     fail() {
-        printf '%s\n' "$*" >&2
+        if (( $# > 0 )); then
+            printf '%s\n' "$*" >&2
+            return 1
+        fi
+        local line
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            printf '%s\n' "$line"
+        done >&2
         return 1
     }
 fi

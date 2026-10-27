@@ -1286,6 +1286,19 @@ EOM
     [ "$stderr" = '-n \t' ]
 }
 
+@test "guard: fail polyfill -> without arguments, prints stdin to stderr as bats-support's fail does" {
+    run --separate-stderr fail <<< $'report line one\nreport line two'
+    [ "$status" -eq 1 ]
+    [ "$output" = "" ]
+    [ "$stderr" = $'report line one\nreport line two' ]
+}
+
+@test "guard: fail polyfill -> without arguments, prints a last line that has no newline" {
+    run --separate-stderr fail < <(printf 'unterminated')
+    [ "$status" -eq 1 ]
+    [ "$stderr" = unterminated ]
+}
+
 @test "guard: load -> loading the file twice is harmless" {
     load "$BATS_TEST_DIRNAME/../src/matrix.bash"
     run_matrix brackets <<'EOM'
