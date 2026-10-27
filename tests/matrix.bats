@@ -979,11 +979,20 @@ EOM
 }
 
 @test "compliance: locale -> LC_ALL is left alone for the caller and the command" {
-    local before="${LC_ALL-unset}"
+    # The regex counts é as one letter only in a UTF-8 locale, so a runner that
+    # leaves LC_ALL=C behind fails the row. The image or the machine may start in C.
+    local locale
+    # shellcheck disable=SC2030  # the subshell tries a locale and leaves the test's alone
+    for locale in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8 ''; do
+        [[ -n "$locale" ]] || skip 'no UTF-8 locale on this machine'
+        (LC_ALL="$locale"; [[ é == [[:alpha:]] ]]) 2>/dev/null && break
+    done
+    # shellcheck disable=SC2031  # set here for the matrix, not taken from the subshell
+    export LC_ALL="$locale"
     run_matrix brackets <<'EOM'
         café | 0 | ~ ^\[[[:alpha:]]{4}\]$
 EOM
-    [ "${LC_ALL-unset}" = "$before" ]
+    [ "$LC_ALL" = "$locale" ]
 }
 
 @test "compliance: globals -> status and output hold the last row after the matrix" {
